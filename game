@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mini Racer — Unlock & Upgrade</title>
+<style>
+  :root{
+    --bg:#0e0f13; --panel:#151821; --panel2:#10131a; --text:#e6ecff; --accent:#7bdcff; --accent2:#ffd36e; --good:#7CFF8D; --bad:#FF6B6B;
+  }
+  html,body{height:100%;margin:0;background:radial-gradient(1200px 600px at 50% 40%, #1b1f2b 0%, #0e0f13 60%, #0a0b0e 100%); color:var(--text); font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+  #wrap{display:flex; flex-direction:column; gap:10px; padding:14px; max-width:1100px; margin:0 auto;}
+  header{display:flex; align-items:center; justify-content:space-between;}
+  h1{font-size:18px; letter-spacing:.5px; margin:0; opacity:.9}
+  .btn{background:linear-gradient(180deg,#2b3246,#1a2030); border:1px solid #2b3246; color:var(--text); padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:600; transition:.15s transform ease, .2s background ease; }
+  .btn:hover{transform:translateY(-1px);}
+  .row{display:flex; gap:12px; align-items:center;}
+  canvas{width:100%; height:auto; border-radius:14px; background:#0a0b0e; box-shadow: 0 10px 40px rgba(0,0,0,.5), inset 0 0 0 1px #1b2130;}
+  #hud{position:relative; margin-top:8px;}
+  .hudbar{display:flex; gap:12px; flex-wrap:wrap}
+  .chip{background:linear-gradient(180deg,#1a2030,#121623); border:1px solid #232a3d; padding:8px 10px; border-radius:12px; font-size:13px; display:flex; gap:8px; align-items:center;}
+  .pill{padding:2px 8px; border-radius:99px; font-size:12px; background:#0f131d; border:1px solid #27324b;}
+  .accent{color:#0ff}
+  .accent2{color:var(--accent2)}
+  #garage{position:fixed; inset:0; display:none; place-items:center; background:rgba(6,7,10,.66); backdrop-filter: blur(8px);}
+  #panel{width:min(900px,96vw); max-height:88vh; overflow:auto; background:linear-gradient(180deg,#121722,#0d1119); border:1px solid #2a3146; border-radius:16px; padding:16px;}
+  #panel h2{margin:0 0 6px 0; font-size:18px;}
+  .grid{display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-top:10px;}
+  .card{background:linear-gradient(180deg,#0f141f,#0c1018); border:1px solid #21283c; border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:10px;}
+  .stat{display:flex; justify-content:space-between; font-size:13px; opacity:.9}
+  .bars{display:flex; gap:6px;}
+  .bar{flex:1; height:6px; background:#10141e; border:1px solid #1e2435; border-radius:99px; overflow:hidden;}
+  .bar > i{display:block; height:100%; width:0%;}
+  .bar.speed i{background:linear-gradient(90deg,#64ffd0,#27eab7);}
+  .bar.accel i{background:linear-gradient(90deg,#a8b3ff,#7bdcff);}
+  .bar.grip i{background:linear-gradient(90deg,#ffd36e,#ffac6e);}
+  .price{font-weight:700; color:var(--accent2)}
+  .mute{opacity:.6}
+  .kbd{font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#0d1119; border:1px solid #232a3d; border-radius:6px; padding:2px 6px; font-size:12px}
+  footer{opacity:.6; font-size:12px; margin-top:6px;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1>MINI RACER — Unlock • Upgrade • Send It 🚗💨</h1>
+    <div class="row">
+      <button class="btn" id="toggleGarage">Open Garage (G)</button>
+      <button class="btn" id="resetBtn">Reset Car (R)</button>
+    </div>
+  </header>
+
+  <canvas id="game" width="1100" height="680"></canvas>
+
+  <div id="hud">
+    <div class="hudbar">
+      <div class="chip">Speed: <b id="speedVal">0</b> km/h</div>
+      <div class="chip">Lap: <b id="lapVal">0</b> / <span class="accent">∞</span></div>
+      <div class="chip">Best Lap: <b id="bestLap">—</b></div>
+      <div class="chip">Coins: <b id="coinsVal" class="accent2">0</b></div>
+      <div class="chip">Car: <b id="carName">—</b></div>
+      <div class="chip mute">Tips <span class="pill">Press <span class="kbd">G</span> for Garage • <span class="kbd">WASD/↑←↓→</span> to drive • <span class="kbd">H</span> to hide tips</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Garage modal -->
+<div id="garage">
+  <div id="panel">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+      <h2>Garage & Upgrades</h2>
+      <button class="btn" id="closeGarage">Close (G)</button>
+    </div>
+    <div class="chip" style="margin:8px 0 12px 0;">Coins: <b id="gCoins" class="accent2">0</b></div>
+    <div class="grid" id="carGrid"></div>
+    <footer>Progress auto-saves. Each car has independent upgrades. Coins are earned on track.</footer>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // ---------- Save/Load ----------
+  const saveKey = 'miniRacerSave_v1';
+  const defaultSave = () => ({
+    coins: 0,
+    selectedCarId: 'SPRITE',
+    unlocked: ['SPRITE'],
+    cars: {
+      SPRITE: {speedLv:0, accelLv:0, gripLv:0},
+      BULLET: {speedLv:0, accelLv:0, gripLv:0},
+      DRIFTR: {speedLv:0, accelLv:0, gripLv:0},
+      TANKY:  {speedLv:0, accelLv:0, gripLv:0}
+    },
+    showTips: true,
+    bestLapMs: null
+  });
+  let save = load();
+  function load(){
+    try{
+      const raw = localStorage.getItem(saveKey);
+      if(!raw) return defaultSave();
+      const data = JSON.parse(raw);
+      return Object.assign(defaultSave(), data);
+    }catch(e){ return defaultSave(); }
+  }
+  function persist(){ localStorage.setItem(saveKey, JSON.stringify(save)); }
+
+  // ---------- Car Catalog ----------
+  const CAR_DEF = {
+    SPRITE: {name:'Sprite', color:'#8be9fd', price:0, base:{max:150, accel:260, grip:0.9}},
+    BULLET: {name:'Bullet', color:'#ffd36e', price:120, base:{max:180, accel:300, grip:0.92}},
+    DRIFTR: {name:'Driftr', color:'#ff8bd1', price:250, base:{max:195, accel:290, grip:0.82}},
+    TANKY:  {name:'Tanky', color:'#7CFF8D', price:400, base:{max:165, accel:240, grip:1.05}}
+  };
+  const UPGRADE = {
+    speed: {label:'Top Speed', cost:[60,120,240,400], per: +12},
+    accel: {label:'Acceleration', cost:[50,100,200,360], per: +22},
+    grip:  {label:'Grip', cost:[40,80,160,280], per: +0.04},
+    maxLv: 4
+  };
+
+  // ---------- Input ----------
+  const keys = new Set();
+  window.addEventListener('keydown', e=>{
+    keys.add(e.key.toLowerCase());
+    if(e.key === 'g' || e.key === 'G'){ toggleGarage(); }
+    if(e.key === 'r' || e.key === 'R'){ resetCar(); }
+    if(e.key === 'h' || e.key === 'H'){ save.showTips = !save.showTips; persist(); }
+  });
+  window.addEventListener('keyup', e=> keys.delete(e.key.toLowerCase()));
+
+  // ---------- Track (donut + subtle bends) ----------
+  const track = {
+    cx: canvas.width/2,
+    cy: canvas.height/2,
+    outerR: 250,
+    innerR: 150,
+    // checkpoint ray for lap counting (to the right side)
+    cpAngle: -Math.PI/2, // top (12 o'clock)
+    coins: [], // {x,y,collected}
+    coinCount: 26
+  };
+  function generateCoins(){
+    track.coins.length = 0;
+    const midR = (track.outerR + track.innerR)/2;
+    for(let i=0;i<track.coinCount;i++){
+      const a = (i/track.coinCount) * Math.PI*2;
+      const rJitter = Math.sin(i*1.7)*8 + (i%3===0? 12:0);
+      const x = track.cx + (midR + rJitter)*Math.cos(a);
+      const y = track.cy + (midR + rJitter)*Math.sin(a);
+      track.coins.push({x,y,collected:false});
+    }
+  }
+  generateCoins();
+
+  function onTrack(x,y){
+    const dx = x - track.cx, dy = y - track.cy;
+    const dist = Math.hypot(dx,dy);
+    // mild wavy edge for fun: expand/contract radius by sinusoid
+    const wav = Math.sin((Math.atan2(dy,dx))*6)*8;
+    return (dist <= track.outerR + wav) && (dist >= track.innerR + wav);
+  }
+
+  // ---------- Car Physics ----------
+  function getCarStats(id){
+    const base = CAR_DEF[id].base;
+    const up = save.cars[id];
+    const max = base.max + up.speedLv * UPGRADE.per;
+    const accel = base.accel + up.accelLv * UPGRADE.per;
+    const grip = +(base.grip + up.gripLv * UPGRADE.per).toFixed(3);
+    return {max, accel, grip};
+  }
+
+  const car = {
+    id: save.selectedCarId,
+    x: track.cx + (track.innerR+20),
+    y: track.cy,
+    angle: Math.PI, // facing left initially
+    w: 20, h: 12,
+    speed: 0, // px/sec scaled to km/hish
+    lastOnTrack: true,
+    lap: 0,
+    prevSide: null,
+    lapStartTime: performance.now(),
+    lastLapMs: null
+  };
+  function resetCar(){
+    car.x = track.cx + (track.innerR+24);
+    car.y = track.cy;
+    car.angle = Math.PI;
+    car.speed = 0;
+    car.prevSide = null;
+    car.lastOnTrack = true;
+  }
+
+  function update(dt){
+    const stats = getCarStats(car.id);
+    const thrust = (keys.has('w')||keys.has('arrowup')) ? 1 : (keys.has('s')||keys.has('arrowdown')) ? -0.6 : 0;
+    const turnLeft = (keys.has('a')||keys.has('arrowleft'));
+    const turnRight = (keys.has('d')||keys.has('arrowright'));
+
+    // base physics
+    const accel = thrust * stats.accel; // px/s^2
+    car.speed += accel * dt;
+
+    // friction & off-track penalty
+    const posOnTrack = onTrack(car.x, car.y);
+    const fric = posOnTrack ? 130 : 220; // higher drag off-track
+    if(car.speed > 0){ car.speed = Math.max(0, car.speed - fric*dt); }
+    else if(car.speed < 0){ car.speed = Math.min(0, car.speed + 200*dt); }
+
+    // clamp
+    const maxSpeed = (posOnTrack ? stats.max : stats.max*0.5);
+    car.speed = Math.max(-maxSpeed*0.4, Math.min(maxSpeed, car.speed));
+
+    // steer — scale by speed fraction and grip
+    const steerStrength = (0.0026 + 0.0009 * (1 - Math.min(1, Math.abs(car.speed)/maxSpeed))) * (stats.grip);
+    if(turnLeft) car.angle -= car.speed * steerStrength;
+    if(turnRight) car.angle += car.speed * steerStrength;
+
+    // integrate
+    car.x += Math.cos(car.angle) * car.speed * dt;
+    car.y += Math.sin(car.angle) * car.speed * dt;
+
+    // gently push car out of grass back toward track ring
+    const wasOn = car.lastOnTrack;
+    car.lastOnTrack = posOnTrack;
+    if(!posOnTrack){
+      const toC = Math.atan2(car.y - track.cy, car.x - track.cx);
+      car.x += Math.cos(toC) * 20 * dt;
+      car.y += Math.sin(toC) * 20 * dt;
+    }
+
+    // coin pickups
+    for(const coin of track.coins){
+      if(coin.collected) continue;
+      const dx = coin.x - car.x, dy = coin.y - car.y;
+      if((dx*dx + dy*dy) < 18*18){
+        coin.collected = true;
+        save.coins += 5;
+        persist();
+        // subtle pickup feedback by brief speed boost
+        car.speed += 30;
+      }
+    }
+
+    // lap detection: crossing checkpoint ray from right side to left side
+    const side = checkpointSide(car.x, car.y);
+    if(wasOn && car.lastOnTrack && car.prevSide !== null && car.prevSide < 0 && side > 0){
+      // completed a lap
+      const now = performance.now();
+      const lapMs = now - car.lapStartTime;
+      car.lap++;
+      car.lastLapMs = lapMs;
+      car.lapStartTime = now;
+      if(save.bestLapMs === null || lapMs < save.bestLapMs){ save.bestLapMs = lapMs; persist(); }
+      // respawn coins every lap for replay value
+      for(const c of track.coins) c.collected = false;
+    }
+    car.prevSide = side;
+  }
+
+  function checkpointSide(x,y){
+    // checkpoint vertical line segment near 12 o'clock; compute which side of the ray the car is on
+    const ax = track.cx + (track.innerR+2)*Math.cos(track.cpAngle);
+    const ay = track.cy + (track.innerR+2)*Math.sin(track.cpAngle);
+    const bx = track.cx + (track.outerR-2)*Math.cos(track.cpAngle);
+    const by = track.cy + (track.outerR-2)*Math.sin(track.cpAngle);
+    // cross product sign
+    const cross = (bx-ax)*(y-ay) - (by-ay)*(x-ax);
+    return Math.sign(cross);
+  }
+
+  // ---------- Render ----------
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // backdrop grid
+    drawGrid();
+
+    // track
+    drawTrack();
+
+    // coins
+    for(const c of track.coins){
+      if(c.collected) continue;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 7.5, 0, Math.PI*2);
+      const g = ctx.createRadialGradient(c.x-2, c.y-2,1, c.x, c.y, 8);
+      g.addColorStop(0,'#fff4');
+      g.addColorStop(1,'#ffd36e');
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#3b2a10';
+      ctx.stroke();
+    }
+
+    // checkpoint line
+    {
+      const ax = track.cx + (track.innerR+2)*Math.cos(track.cpAngle);
+      const ay = track.cy + (track.innerR+2)*Math.sin(track.cpAngle);
+      const bx = track.cx + (track.outerR-2)*Math.cos(track.cpAngle);
+      const by = track.cy + (track.outerR-2)*Math.sin(track.cpAngle);
+      ctx.save();
+      ctx.globalAlpha = 0.25;
+      ctx.setLineDash([6,6]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#7bdcff';
+      ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+      ctx.restore();
+    }
+
+    // car
+    drawCar();
+
+    // HUD inline (minimal, main numeric HUD below canvas)
+    // (intentionally light; main HUD is HTML)
+  }
+
+  function drawGrid(){
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.lineWidth = 1;
+    const step = 26;
+    for(let x=0; x<canvas.width; x+=step){
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.strokeStyle = '#7bdcff'; ctx.stroke();
+    }
+    for(let y=0; y<canvas.height; y+=step){
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.strokeStyle = '#ffd36e'; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawTrack(){
+    // road
+    ctx.save();
+    // asphalt
+    const radGrad = ctx.createRadialGradient(track.cx, track.cy, track.innerR, track.cx, track.cy, track.outerR+40);
+    radGrad.addColorStop(0, '#0d1016');
+    radGrad.addColorStop(1, '#0a0c11');
+    ctx.fillStyle = radGrad;
+    ringPath(track.cx, track.cy, track.innerR, track.outerR, true);
+    ctx.fill();
+
+    // edge strokes
+    ringPath(track.cx, track.cy, track.innerR, track.outerR, false);
+    ctx.strokeStyle = '#1f2738';
+    ctx.lineWidth = 10;
+    ctx.stroke();
+
+    // dashed centerline
+    ctx.setLineDash([18,18]);
+    ctx.lineDashOffset -= 2;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,.35)';
+    ringMidline();
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function ringPath(cx, cy, r1, r2, wavy){
+    ctx.beginPath();
+    // outer
+    for(let a=0; a<=Math.PI*2+0.001; a+=Math.PI/64){
+      const wav = wavy ? Math.sin(a*6)*8 : 0;
+      const x = cx + (r2 + wav) * Math.cos(a);
+      const y = cy + (r2 + wav) * Math.sin(a);
+      if(a===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    // inner (reverse)
+    for(let a=Math.PI*2; a>=-0.001; a-=Math.PI/64){
+      const wav = wavy ? Math.sin(a*6)*8 : 0;
+      const x = cx + (r1 + wav) * Math.cos(a);
+      const y = cy + (r1 + wav) * Math.sin(a);
+      if(a===Math.PI*2) ctx.lineTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.closePath();
+  }
+  function ringMidline(){
+    const rm = (track.innerR + track.outerR)/2;
+    ctx.beginPath();
+    for(let a=0; a<=Math.PI*2+0.001; a+=Math.PI/64){
+      const wav = Math.sin(a*6)*8;
+      const x = track.cx + (rm + wav) * Math.cos(a);
+      const y = track.cy + (rm + wav) * Math.sin(a);
+      if(a===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+  }
+
+  function drawCar(){
+    const stats = getCarStats(car.id);
+    const def = CAR_DEF[car.id];
+
+    ctx.save();
+    ctx.translate(car.x, car.y);
+    ctx.rotate(car.angle);
+
+    // shadow
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(0, 6, car.w*0.7, car.h*0.8, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // body
+    roundRect(-car.w/1.2, -car.h/1.3, car.w*1.8, car.h*1.8, 5, def.color, '#243046');
+
+    // windshield
+    ctx.fillStyle = '#a7c6ff';
+    ctx.globalAlpha = 0.7;
+    roundRect(-car.w*0.2, -car.h*0.8, car.w*0.7, car.h*0.9, 3, '#a7c6ff', '#2b3a55');
+    ctx.globalAlpha = 1;
+
+    // nose stripe / direction arrow
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(car.w*0.6, -2, 8, 4);
+
+    // tiny wheels
+    ctx.fillStyle = '#141922';
+    ctx.fillRect(-car.w*0.9, -car.h*1.1, 6, 4);
+    ctx.fillRect(-car.w*0.9,  car.h*0.9, 6, 4);
+    ctx.fillRect( car.w*0.9, -car.h*1.1, 6, 4);
+    ctx.fillRect( car.w*0.9,  car.h*0.9, 6, 4);
+
+    ctx.restore();
+  }
+
+  function roundRect(x,y,w,h,r,fill,stroke){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+    if(fill){ ctx.fillStyle = fill; ctx.fill(); }
+    if(stroke){ ctx.lineWidth = 1; ctx.strokeStyle = stroke; ctx.stroke(); }
+  }
+
+  // ---------- HUD DOM ----------
+  const hud = {
+    speedVal: document.getElementById('speedVal'),
+    lapVal: document.getElementById('lapVal'),
+    bestLap: document.getElementById('bestLap'),
+    coinsVal: document.getElementById('coinsVal'),
+    carName: document.getElementById('carName'),
+    gCoins: document.getElementById('gCoins'),
+  };
+  function msToTime(ms){
+    const m = Math.floor(ms/60000);
+    const s = Math.floor((ms%60000)/1000);
+    const cs = Math.floor((ms%1000)/10);
+    return `${m}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
+  }
+  function refreshHUD(){
+    hud.speedVal.textContent = Math.max(0, Math.round(Math.abs(car.speed)*0.9)); // scaled "km/h"
+    hud.lapVal.textContent = car.lap;
+    hud.coinsVal.textContent = save.coins;
+    hud.carName.textContent = CAR_DEF[car.id].name;
+    hud.bestLap.textContent = save.bestLapMs ? msToTime(save.bestLapMs) : '—';
+    hud.gCoins.textContent = save.coins;
+  }
+
+  // ---------- Garage UI ----------
+  const garageEl = document.getElementById('garage');
+  const grid = document.getElementById('carGrid');
+  const toggleBtn = document.getElementById('toggleGarage');
+  const closeGarageBtn = document.getElementById('closeGarage');
+  toggleBtn.onclick = toggleGarage;
+  closeGarageBtn.onclick = toggleGarage;
+  function toggleGarage(){
+    garageEl.style.display = (garageEl.style.display==='grid') ? 'none' : 'grid';
+    buildGarage();
+  }
+  function buildGarage(){
+    grid.innerHTML = '';
+    for(const [id, def] of Object.entries(CAR_DEF)){
+      const owned = save.unlocked.includes(id);
+      const up = save.cars[id];
+      const stats = getCarStats(id);
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div style="font-weight:700">${def.name}</div>
+          <div class="pill" style="border-color:${owned?'#304a34':'#4a3030'}; color:${owned?'#7cff8d':'#ff8b8b'}">${owned?'Owned':'Locked'}</div>
+        </div>
+        <div style="height:70px; position:relative; border-radius:10px; background:linear-gradient(180deg,#0b0f17,#0a0d14); border:1px solid #1e2435; display:flex; align-items:center; justify-content:center;">
+          <svg width="150" height="54" viewBox="0 0 150 54" role="presentation" aria-hidden="true">
+            <g transform="translate(75,27)">
+              <ellipse cx="0" cy="10" rx="40" ry="12" fill="rgba(0,0,0,.35)"/>
+              <rect x="-28" y="-12" width="56" height="24" rx="6" fill="${def.color}" stroke="#243046"/>
+              <rect x="-8" y="-14" width="20" height="12" rx="3" fill="#a7c6ff" opacity="0.7" stroke="#2b3a55"/>
+              <rect x="-30" y="-16" width="10" height="6" rx="2" fill="#141922"/>
+              <rect x="20" y="-16" width="10" height="6" rx="2" fill="#141922"/>
+            </g>
+          </svg>
+        </div>
+        <div class="stat"><span>Top Speed</span><b>${Math.round(stats.max)} </b></div>
+        <div class="bars"><div class="bar speed"><i style="width:${pct(stats.max,240)}%"></i></div></div>
+        <div class="stat"><span>Acceleration</span><b>${Math.round(stats.accel)}</b></div>
+        <div class="bars"><div class="bar accel"><i style="width:${pct(stats.accel,360)}%"></i></div></div>
+        <div class="stat"><span>Grip</span><b>${stats.grip.toFixed(2)}</b></div>
+        <div class="bars"><div class="bar grip"><i style="width:${pct(stats.grip,1.2)*100}%"></i></div></div>
+        <div class="row">
+          ${owned ? `<button class="btn" data-act="select">Select</button>` : `<button class="btn" data-act="buy">Buy <span class="price">(${def.price}💰)</span></button>`}
+          ${owned ? '' : ''}
+        </div>
+        ${owned ? `
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px;">
+          ${upgradeBtn('speed', up.speedLv)}
+          ${upgradeBtn('accel', up.accelLv)}
+          ${upgradeBtn('grip', up.gripLv)}
+        </div>
+        `:''}
+      `;
+      card.querySelectorAll('button').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const act = btn.dataset.act;
+          if(act==='buy'){
+            if(save.coins >= def.price){
+              save.coins -= def.price;
+              save.unlocked.push(id);
+              persist();
+              buildGarage();
+              refreshHUD();
+            } else {
+              pulse(btn);
+            }
+          }
+          if(act==='select'){
+            save.selectedCarId = id; car.id = id; persist(); buildGarage(); refreshHUD();
+          }
+          if(act && act.startsWith('u-')){
+            const kind = act.split('-')[1]; // speed/accel/grip
+            const current = save.cars[id][kind+'Lv'];
+            if(current >= UPGRADE.maxLv) return;
+            const cost = UPGRADE[kind].cost[current];
+            if(save.coins >= cost){
+              save.coins -= cost;
+              save.cars[id][kind+'Lv']++;
+              persist();
+              buildGarage();
+              refreshHUD();
+            } else {
+              pulse(btn);
+            }
+          }
+        });
+      });
+      grid.appendChild(card);
+    }
+  }
+  function upgradeBtn(kind, lv){
+    const label = UPGRADE[kind].label;
+    const maxed = lv >= UPGRADE.maxLv;
+    const nextCost = maxed ? '' : ` (${UPGRADE[kind].cost[lv]}💰)`;
+    return `
+      <button class="btn" data-act="u-${kind}" ${maxed?'disabled':''}>
+        ${label} Lv.${lv}${maxed?' — MAX': nextCost}
+      </button>
+    `;
+  }
+  function pct(v, max){ return Math.min(1, v/max)*100; }
+  function pulse(el){
+    el.animate([{transform:'translateY(0)'},{transform:'translateY(-2px)'},{transform:'translateY(0)'}],{duration:220});
+  }
+
+  // ---------- Loop ----------
+  let last = performance.now();
+  function frame(now){
+    const dt = (now - last)/1000; last = now;
+    for(let n=0; n<Math.min(3, Math.ceil(dt/0.016)); n++){ // simple stability for low FPS
+      update(dt/Math.min(3, Math.ceil(dt/0.016)));
+    }
+    draw();
+    refreshHUD();
+    requestAnimationFrame(frame);
+  }
+  resetCar();
+  requestAnimationFrame(frame);
+
+  // ---------- Buttons ----------
+  document.getElementById('resetBtn').onclick = resetCar;
+
+  // initial garage build (closed by default)
+  buildGarage();
+  refreshHUD();
+
+})();
+</script>
+</body>
+</html>
